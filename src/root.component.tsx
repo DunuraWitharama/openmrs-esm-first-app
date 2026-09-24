@@ -1,11 +1,14 @@
 import React, { useState } from 'react';
-import { Button, TextInput, TextArea } from '@carbon/react';
+import { Button, TextArea, TextInput } from '@carbon/react';
 import { openmrsFetch, restBaseUrl, showSnackbar } from '@openmrs/esm-framework';
+import { usePrivileges } from './privileges.resource';
+import PrivilegeList from './privilege-list.component';
 
 const Root: React.FC = () => {
   const [name, setName] = useState('');
   const [description, setDescription] = useState('');
   const [saving, setSaving] = useState(false);
+  const { privileges, isLoading, error, mutate } = usePrivileges();
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -24,9 +27,10 @@ const Root: React.FC = () => {
       showSnackbar({ title: `Privilege "${name}" created`, kind: 'success' });
       setName('');
       setDescription('');
-    } catch (error) {
-      const message =
-        (error as { responseBody?: { error?: { message?: string } } }).responseBody?.error?.message ?? String(error);
+      mutate(); // reload the table so the new privilege appears
+    } catch (err) {
+      const response = err as { responseBody?: { error?: { message?: string } } };
+      const message = response.responseBody?.error?.message ?? String(err);
       showSnackbar({ title: 'Could not create privilege', subtitle: message, kind: 'error' });
     } finally {
       setSaving(false);
@@ -34,9 +38,10 @@ const Root: React.FC = () => {
   };
 
   return (
-    <div style={{ padding: '2rem', maxWidth: '600px' }}>
+    <div style={{ padding: '2rem', maxWidth: '900px' }}>
       <h2 style={{ marginBottom: '1.5rem' }}>Privilege Manager</h2>
-      <form onSubmit={handleSubmit}>
+
+      <form onSubmit={handleSubmit} style={{ maxWidth: '600px', marginBottom: '3rem' }}>
         <TextInput
           id="privilege-name"
           labelText="Privilege name"
@@ -47,7 +52,7 @@ const Root: React.FC = () => {
           <TextArea
             id="privilege-description"
             labelText="Description"
-            rows={4}
+            rows={3}
             value={description}
             onChange={(e) => setDescription(e.target.value)}
           />
@@ -56,6 +61,9 @@ const Root: React.FC = () => {
           {saving ? 'Saving...' : 'Create privilege'}
         </Button>
       </form>
+
+      <h3 style={{ marginBottom: '1rem' }}>All privileges</h3>
+      <PrivilegeList privileges={privileges} isLoading={isLoading} error={error} />
     </div>
   );
 };

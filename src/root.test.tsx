@@ -1,52 +1,72 @@
-/**
- * This is the root test for this page. It simply checks that the page
- * renders. If the components of your page are highly interdependent,
- * (e.g., if the `Root` component had state that communicated
- * information between `Greeter` and `PatientGetter`) then you might
- * want to do most of your testing here. If those components are
- * instead quite independent (as is the case in this example), then
- * it would make more sense to test those components independently.
- *
- * The key thing to remember, always, is: write tests that behave like
- * users. They should *look* for elements by their visual
- * characteristics, *interact* with them, and (mostly) *assert* based
- * on things that would be visually apparent to a user.
- *
- * To learn more about how we do testing, see the following resources:
- *   https://o3-docs.openmrs.org/en-US/docs/frontend-modules/unit-and-integration-testing
- *   https://kentcdodds.com/blog/how-to-know-what-to-test
- *   https://kentcdodds.com/blog/testing-implementation-details
- *   https://kentcdodds.com/blog/common-mistakes-with-react-testing-library
- *
- * Kent C. Dodds is the inventor of `@testing-library`:
- *   https://testing-library.com/docs/guiding-principles
- */
 import React from 'react';
-import { expect, it, vi } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { render, screen } from '@testing-library/react';
-import { useConfig } from '@openmrs/esm-framework';
-import { type Config } from './config-schema';
+import userEvent from '@testing-library/user-event';
+import { openmrsFetch, showSnackbar } from '@openmrs/esm-framework';
+import { usePrivileges } from './privileges.resource';
 import Root from './root.component';
 
-/**
- * This is an idiomatic way of dealing with mocked files. Note that
- * `useConfig` is already mocked; the Vitest `alias` config (see
- * `vitest.config.ts`) has mapped the `@openmrs/esm-framework` import
- * to a mock file. This line just tells TypeScript that the object is,
- * in fact, a mock, and so will have methods like `mockReturnValue`.
- */
-const mockUseConfig = vi.mocked(useConfig<Config>);
+// Replace the real data-fetching hook with a fake one we control
+vi.mock('./privileges.resource', () => ({
+  usePrivileges: vi.fn(),
+}));
 
-it('renders a landing page for the Template app', () => {
-  const config: Config = { casualGreeting: false, whoToGreet: ['World'] };
-  mockUseConfig.mockReturnValue(config);
+const mockUsePrivileges = vi.mocked(usePrivileges);
+const mockOpenmrsFetch = vi.mocked(openmrsFetch);
+const mockShowSnackbar = vi.mocked(showSnackbar);
+const mockMutate = vi.fn();
 
-  render(<Root />);
+const testPrivileges = [
+  { uuid: '1', name: 'Add Patients', description: 'Able to add patients', retired: false },
+  { uuid: '2', name: 'Test Privilege', description: 'My first privilege', retired: false },
+];
 
-  expect(screen.getByRole('heading', { name: /welcome to the o3 template app/i })).toBeInTheDocument();
-  expect(screen.getByRole('heading', { name: /configuration system/i })).toBeInTheDocument();
-  expect(screen.getByRole('heading', { name: /extension system/i })).toBeInTheDocument();
-  expect(screen.getByRole('heading', { name: /data fetching/i })).toBeInTheDocument();
-  expect(screen.getByRole('heading', { name: /resources/i })).toBeInTheDocument();
-  expect(screen.getByRole('button', { name: /get a patient named 'test'/i })).toBeInTheDocument();
+describe('Privilege Manager', () => {
+  beforeEach(() => {
+    mockUsePrivileges.mockReturnValue({
+      privileges: testPrivileges,
+      isLoading: false,
+      error: undefined,
+      mutate: mockMutate,
+    } as never);
+  });
+
+  it('shows the form and the list of privileges', () => {
+    render(<Root />);
+
+    expect(screen.getByRole('heading', { name: /privilege manager/i })).toBeInTheDocument();
+    expect(screen.getByRole('textbox', { name: /privilege name/i })).toBeInTheDocument();
+    expect(screen.getByText('Add Patients')).toBeInTheDocument();
+    expect(screen.getByText('Test Privilege')).toBeInTheDocument();
+  });
+
+  it('filters the list when you search', async () => {
+    const user = userEvent.setup();
+    render(<Root />);
+
+    await user.type(screen.getByRole('searchbox'), 'Test');
+
+    expect(screen.getByText('Test Privilege')).toBeInTheDocument();
+    expect(screen.queryByText('Add Patients')).not.toBeInTheDocument();
+  });
+
+  it('creates a privilege and reloads the list', async () => {
+    const user = userEvent.setup();
+    mockOpenmrsFetch.mockResolvedValue({ data: {} } as never);
+    render(<Root />);
+
+    await user.type(screen.getByRole('textbox', { name: /privilege name/i }), 'New Privilege');
+    await user.type(screen.getByRole('textbox', { name: /description/i }), 'Created in a test');
+    await user.click(screen.getByRole('button', { name: /create privilege/i }));
+
+    expect(mockOpenmrsFetch).toHaveBeenCalledWith(
+      expect.stringContaining('/privilege'),
+      expect.objectContaining({
+        method: 'POST',
+        body: { name: 'New Privilege', description: 'Created in a test' },
+      }),
+    );
+    expect(mockShowSnackbar).toHaveBeenCalledWith(expect.objectContaining({ kind: 'success' }));
+    expect(mockMutate).toHaveBeenCalled();
+  });
 });
